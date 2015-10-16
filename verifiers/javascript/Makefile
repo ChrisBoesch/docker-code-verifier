@@ -1,6 +1,6 @@
 cwd = $(shell pwd)
 
-repo-name ?= singpath/verifier-python3
+repo-name ?= singpath/verifier-javascript
 tag ?= latest
 version ?= $(shell cat ../../VERSION)
 
@@ -12,7 +12,7 @@ docker ?= docker
 	${docker} tag -f ${repo-name}:${version} ${repo-name}:${tag}
 	touch $@
 
-.images/${repo-name}.${version}: Dockerfile server.py codeverifier/**/* codeverifier/*
+.images/${repo-name}.${version}: Dockerfile *.js test/*.js .dockerignore
 	mkdir -p .images/singpath
 	${docker} build --rm=true -t ${repo-name}:${version} .
 	touch $@
@@ -24,9 +24,12 @@ push-images: images
 
 .PHONY: images push-images
 
-run-image:
-	${docker} run -ti --rm -p 5000:5000 -v ${cwd}:/app ${repo-name}:${version}
+run-image: images
+	${docker} run -ti --rm -p 5000:5000 ${repo-name}:${version} bash
 
-test:
-	${docker} run -ti --rm -w /app -v ${cwd}:/app ${repo-name}:${version} python3 -m unittest discover -s codeverifier/
+run-image-dev: images
+	${docker} run -ti --rm -p 5000:5000 -v ${cwd}:/app ${repo-name}:${version} bash
+
+test: images
+	${docker} run -ti --rm ${repo-name}:${version} npm test
 .PHONY: run-image test
