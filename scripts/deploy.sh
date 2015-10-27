@@ -71,7 +71,7 @@ function forwardrule_exist() {
 
 function group_exist() {
     echo -n "Checking if managed instance group named '$1' in zone '$2' already exists..."
-    found $(gcloud preview managed-instance-groups --zone "$2" list -l | awk '$1=="'$1'" {print $1}')
+    found $(gcloud compute instance-groups managed list --zone "$2" | awk '$1=="'$1'" {print $1}')
     return $?   
 }
 
@@ -104,10 +104,13 @@ function template_exist() {
 
 
 function create_autoscaler() {
-    gcloud preview autoscaler --zone "$3" create "$1" \
-         --min-num-replicas "$4" \
-         --max-num-replicas "$5" \
-         --target "$2"
+    gcloud compute instance-groups managed set-autoscaling \
+    	$1 \
+        --zone "$2"\
+		--min-num-replicas "$3" \
+		--max-num-replicas "$4" \
+	    --target-cpu-utilization 0.75 \
+	    --cool-down-period 180
 }
 
 
@@ -129,9 +132,9 @@ function create_forwardrule() {
 function create_group() {
     group_exist $1 $2
     if [[ $? -ne 0 ]]; then
-        gcloud preview managed-instance-groups \
+        gcloud compute instance-groups managed create \
+        	 "$1" \
             --zone "$2" \
-            create "$1" \
             --base-instance-name "$3" \
             --size  "$4"\
             --template "$5" \
@@ -211,16 +214,15 @@ function check_image_builder_instance_status() {
 
     echo "Image builder instance IP:" $ip
     
-    status=$(curl http://${ip}/status.txt)
-    status_fetched=$?
-    while [[ $status_fetched -ne 0 ]]; do
+    code=$(curl -s -o /dev/null -w "%{http_code}" http://${ip}/status.txt)
+    while [[ $code -ne 200 ]]; do
         echo "Failed to fetch image builder instance status..."
         echo "will try again in 30s"
         sleep 30
-        status=$(curl http://${ip}/status.txt)
-        status_fetched=$?
+        code=$(curl -s -o /dev/null -w "%{http_code}" http://${ip}/status.txt)
     done
 
+    status=$(curl http://${ip}/status.txt)
     if [[ "$status" == "done" ]]; then
         echo "Image builder instance is ready."
     elif [[ "$status" == "failed" ]]; then
@@ -305,7 +307,7 @@ function start_cluster() {
 
     ### Autoscaler
     echo -e "\n\nCreating autoscaler..."
-    create_autoscaler "$AUTOSCALER_NAME" "$INSTANCE_GROUP_NAME" "$ZONE" "$CLUSTER_NODE_MIN_COUNT" "$CLUSTER_NODE_MAX_COUNT"
+    create_autoscaler "$INSTANCE_GROUP_NAME" "$ZONE" "$CLUSTER_NODE_MIN_COUNT" "$CLUSTER_NODE_MAX_COUNT"
 
     cluster_ip=$(gcloud compute forwarding-rules list codeverifier-rule --regions us-central1 | cat -n | awk '$1>1{print $4}')
     echo "Test the cluster at http://${cluster_ip}/console/"
@@ -314,8 +316,7 @@ function start_cluster() {
 
 
 function stop_cluster() {
-    gcloud preview autoscaler --zone "$ZONE" delete "$AUTOSCALER_NAME"
-    gcloud preview managed-instance-groups --zone "$ZONE" delete "$INSTANCE_GROUP_NAME"
+    gcloud compute instance-groups managed delete --zone "$ZONE" "$INSTANCE_GROUP_NAME"
 }
 
 
